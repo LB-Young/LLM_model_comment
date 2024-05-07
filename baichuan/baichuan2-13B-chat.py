@@ -81,7 +81,7 @@ class RMSNorm(torch.nn.Module):
 
     def forward(self, hidden_states):
         variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
-        hidden_states = hidden_states * torch.rsqrt(variance + self.epsilon)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.epsilon)    # YoungL：rsqrt是根号的倒数
 
         # convert into half-precision
         if self.weight.dtype in [torch.float16, torch.bfloat16]:
@@ -101,10 +101,10 @@ class MLP(torch.nn.Module):
         self.gate_proj = torch.nn.Linear(hidden_size, intermediate_size, bias=False)
         self.down_proj = torch.nn.Linear(intermediate_size, hidden_size, bias=False)
         self.up_proj = torch.nn.Linear(hidden_size, intermediate_size, bias=False)
-        self.act_fn = ACT2FN[hidden_act]
+        self.act_fn = ACT2FN[hidden_act]        # YoungL：hidden_act值为 silu
 
     def forward(self, x):
-        return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
+        return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))     # YoungL：标准的swiglu计算流程
 
 
 class BaichuanAttention(torch.nn.Module):
@@ -122,10 +122,10 @@ class BaichuanAttention(torch.nn.Module):
             )
         self.W_pack = torch.nn.Linear(
             self.hidden_size, 3 * self.hidden_size, bias=False
-        )
+        )                                                                                               # YoungL：将QKV变换矩阵合并
         self.o_proj = torch.nn.Linear(
             self.num_heads * self.head_dim, self.hidden_size, bias=False
-        )
+        )                                                                                               # YoungL：将注意力矩阵的维度变换为输入维度
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return (
@@ -144,33 +144,33 @@ class BaichuanAttention(torch.nn.Module):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.size()
 
-        proj = self.W_pack(hidden_states)
+        proj = self.W_pack(hidden_states)                           # YoungL：输入经过线性变换得到QKV的合并矩阵
         proj = (
             proj.unflatten(-1, (3, self.hidden_size))
             .unsqueeze(0)
             .transpose(0, -2)
             .squeeze(-2)
-        )               # YoungL：花里胡哨，就是把3换到第0维
+        )                                                           # YoungL：花里胡哨，就是把3换到第0维
         query_states = (
             proj[0].view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        )
+        )                                                                               # YoungL：拆分QKV
         key_states = (
             proj[1].view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        )
+        )                                                                               # YoungL：拆分QKV
         value_states = (
             proj[2].view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        )
+        )                                                                               # YoungL：拆分QKV
 
         kv_seq_len = key_states.shape[-2]
-        if past_key_value is not None:
+        if past_key_value is not None:                                                  # YoungL：将上一轮当前层的kv长度取出，用于计算mask矩阵
             kv_seq_len += past_key_value[0].shape[-2]
 
         if past_key_value is not None:
             # reuse k, v, self_attention
-            key_states = torch.cat([past_key_value[0], key_states], dim=2)
-            value_states = torch.cat([past_key_value[1], value_states], dim=2)
+            key_states = torch.cat([past_key_value[0], key_states], dim=2)      # YoungL：取出上一轮当前层的k，并进行拼接
+            value_states = torch.cat([past_key_value[1], value_states], dim=2)  # YoungL：取出上一轮当前层的v，并进行拼接
 
-        past_key_value = (key_states, value_states) if use_cache else None
+        past_key_value = (key_states, value_states) if use_cache else None              # YoungL：如果需要kv缓存，则更新kv-cache，即加入当前轮新的k和v
         if xops is not None and self.training:
             attn_weights = None
             # query_states = query_states.transpose(1, 2)
@@ -185,9 +185,9 @@ class BaichuanAttention(torch.nn.Module):
         else:
             attn_weights = torch.matmul(
                 query_states, key_states.transpose(2, 3)
-            ) / math.sqrt(self.head_dim)
+            ) / math.sqrt(self.head_dim)                                        # YoungL：Q * K转置，并（缩放）得到注意力矩阵（未经过softmax）
 
-            if attention_mask is not None:
+            if attention_mask is not None:                                      # YoungL：在注意力矩阵上加上mask矩阵
                 if q_len == 1:  # inference with cache
                     if len(attention_mask.size()) == 4:
                         attention_mask = attention_mask[:, :, -1:, :]
@@ -198,12 +198,12 @@ class BaichuanAttention(torch.nn.Module):
                     attn_weights, torch.tensor(torch.finfo(attn_weights.dtype).min)
                 )
 
-            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
-            attn_output = torch.matmul(attn_weights, value_states)
+            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)        # YoungL：注意力矩阵softmax处理
+            attn_output = torch.matmul(attn_weights, value_states)            # YoungL：注意力矩阵 * V
 
-            attn_output = attn_output.transpose(1, 2)
-        attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
-        attn_output = self.o_proj(attn_output)
+            attn_output = attn_output.transpose(1, 2)                           # YoungL：转置，是不是漏了contiguous() ？
+        attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)                   # YoungL：合并head_num和head_dim
+        attn_output = self.o_proj(attn_output)                                            # YoungL：经过线性层输出
 
         if not output_attentions:
             attn_weights = None
@@ -238,7 +238,7 @@ class BaichuanLayer(torch.nn.Module):
     ]:
         residual = hidden_states
 
-        hidden_states = self.input_layernorm(hidden_states)
+        hidden_states = self.input_layernorm(hidden_states)                     # YoungL：前置RMSNorm
 
         # Self Attention
         hidden_states, self_attn_weights, present_key_value = self.self_attn(
@@ -247,14 +247,14 @@ class BaichuanLayer(torch.nn.Module):
             past_key_value=past_key_value,
             output_attentions=output_attentions,
             use_cache=use_cache,
-        )
-        hidden_states = residual + hidden_states
+        )                                                                       # YoungL：计算attention
+        hidden_states = residual + hidden_states                                # YoungL：残差链接
 
         # Fully Connected
-        residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.mlp(hidden_states)
-        hidden_states = residual + hidden_states
+        residual = hidden_states        
+        hidden_states = self.post_attention_layernorm(hidden_states)            # YoungL：前置RMSNorm
+        hidden_states = self.mlp(hidden_states)                                 # YoungL：计算MLP
+        hidden_states = residual + hidden_states                                # YoungL：残差链接
 
         outputs = (hidden_states,)
 

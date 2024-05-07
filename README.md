@@ -2,8 +2,12 @@
 
 ### 代码对比：
 
-MLP代码部分：self.down(self.up(x) * self.silu(self.gate(x)))        
-    # Swish(x) = x*sigmoid(ßx)   GLU(x) = sigmoid(W1x+b)⊗(Vx+c)   SwiGLU(x) = Swish(W1x+b)⊗(Vx+c)
+1. MLP代码部分：
+```
+self.down(self.up(x) * self.silu(self.gate(x)))        
+Swish(x) = x*sigmoid(ßx)   GLU(x) = sigmoid(W1x+b)⊗(Vx+c)   SwiGLU(x) = Swish(W1x+b)⊗(Vx+c)
+```
+```
     - llama：
         - MLP部分增加了张量并行的策略；将silu传递给transformers.activations的ACT2FN；
     - Qwen：
@@ -12,8 +16,10 @@ MLP代码部分：self.down(self.up(x) * self.silu(self.gate(x)))
         - MLP未作任何处理；将silu传递给transformers.activations的ACT2FN；
     - Yi：
         - MLP未作任何处理；将silu传递给transformers.activations的ACT2FN；
+```
 
-Attention部分：
+2. Attention部分：
+```
     - llama：
         - 1、attention部分包含张量并行代码；
         - 2、使用了分组注意力机制，所以在380-381行对k和v进行了复制；
@@ -25,11 +31,18 @@ Attention部分：
     - Yi：
         - 1、使用了分组注意力机制，所以在246-253行对k和v进行了复制；
         - 2、代码内部实现了点积计算的流程；
+```
 
-DecoderLayer部分：
+3. DecoderLayer部分：
+```
     - llama、Qwen、baichuan2、Yi
         - 1、RMS attention resnet RMS MLP resnet
+```
 
-
-RMSNorm部分：RMSNorm(a) = a / RMS(a) ⊙ g，其中RMS(a) = √mean(a^2)
+4. RMSNorm部分：
+```
+RMSNorm(a) = a / RMS(a) ⊙ g，其中RMS(a) = √mean(a^2)
+```
+```
     - llama、Qwen、Yi中self.weight初始化为1矩阵；baichuan2中self.weight初始化为空矩阵；
+```
