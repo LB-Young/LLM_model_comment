@@ -279,7 +279,7 @@ class LlamaAttention(nn.Module):                                            # Yo
         self.head_dim = self.hidden_size // self.num_heads                  # YoungL：多头切分后，每个头的维度
         self.num_key_value_heads = config.num_key_value_heads               # YoungL：K、V的头数
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads  # YoungL：K、V分组
-        # YoungL：因为下文对输入线性变换计算Q、K、V矩阵的时候，Q的维度与K、V不同；并且Q的维度大，所以一个头的K、V对应着多头的Q，K、V的维度小是为了减少缓存的占用；
+        # YoungL：分组注意力机制因为下文对输入线性变换计算Q、K、V矩阵的时候，Q的维度与K、V不同；并且Q的维度大，所以一个头的K、V对应着多头的Q，K、V的维度小是为了减少缓存的占用；
         self.max_position_embeddings = config.max_position_embeddings       # YoungL：最大文本长度
         self.rope_theta = config.rope_theta                                 # YoungL：旋转编码的相位
 
@@ -330,7 +330,7 @@ class LlamaAttention(nn.Module):                                            # Yo
         hidden_states: torch.Tensor,                                        # YoungL：decoder_layer的输入经过归一化之后的结果
         attention_mask: Optional[torch.Tensor] = None,                      # YoungL：attention的mask，对Q与K乘积的结果进行mask
         position_ids: Optional[torch.LongTensor] = None,                    # YoungL：position_ids
-        past_key_value: Optional[Tuple[torch.Tensor]] = None,               # YoungL：上一轮的K、V
+        past_key_value: Optional[Tuple[torch.Tensor]] = None,               # YoungL：上一轮当前层的K、V
         output_attentions: bool = False,                                    # YoungL：是否输出Q与K计算的attention矩阵
         use_cache: bool = False,                                            # YoungL：是否使用缓存
         padding_mask: Optional[torch.LongTensor] = None,                    # YoungL：padding_mask
@@ -377,7 +377,7 @@ class LlamaAttention(nn.Module):                                            # Yo
 
         past_key_value = (key_states, value_states) if use_cache else None          # YoungL：判断是否要保存K、V
 
-        key_states = repeat_kv(key_states, self.num_key_value_groups)               # YoungL：K矩阵的头数进行广播，确保跟Q的头数维度相同，相当于是对应当前头k的不同的q可以同时与同一个k计算attention矩阵了
+        key_states = repeat_kv(key_states, self.num_key_value_groups)               # YoungL：本代码采用了分组注意力机制，所以对，K矩阵的头数进行广播，确保跟Q的头数维度相同，相当于是对应当前头k的不同的q可以同时与同一个k计算attention矩阵
         value_states = repeat_kv(value_states, self.num_key_value_groups)           # YoungL：同上，头数这个维度不同的话无法与Q相乘
 
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)    # YoungL：Q * K转置 / 维度的开根号
@@ -939,7 +939,7 @@ class LlamaModel(LlamaPreTrainedModel):         # YoungL：包括embedding和多
                     padding_mask=padding_mask,          # YoungL：padding的mask
                 )
 
-            hidden_states = layer_outputs[0]    # YoungL：输出的应该是一个结果元组，而第零个元素是当前层的输出
+            hidden_states = layer_outputs[0]    # YoungL：输出的应该是一个结果元组，而第零个元素是当前层的输出， 第一个元素为attention，第二个元素为 KV cache 
 
             if use_cache:   # YoungL：判断是否使用cache
                 next_decoder_cache += (layer_outputs[2 if output_attentions else 1],)  
@@ -1057,8 +1057,8 @@ class LlamaForCausalLM(LlamaPreTrainedModel):               # YoungL：普通生
 
         hidden_states = outputs[0]                              # YoungL：取出最后一层decoder的隐输出
         if self.config.pretraining_tp > 1:                      # YoungL：输出层是否使用张量并行
-            lm_head_slices = self.lm_head.weight.split(self.vocab_size // self.config.pretraining_tp, dim=0)    # YoungL：矩阵竖着切分
-            logits = [F.linear(hidden_states, lm_head_slices[i]) for i in range(self.config.pretraining_tp)]    # YoungL：计算乘积
+            lm_head_slices = self.lm_head.weight.split(self.vocab_size // self.config.pretraining_tp, dim=0)    # YoungL：矩阵在第一个维度上切分，横着切分
+            logits = [F.linear(hidden_states, weight=lm_head_slices[i]) for i in range(self.config.pretraining_tp)]    # YoungL：计算乘积
             logits = torch.cat(logits, dim=-1)                                                                  # YoungL：最后一维拼接
         else:
             logits = self.lm_head(hidden_states)                # YoungL：不做并行处理，直接线性变换
