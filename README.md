@@ -54,5 +54,21 @@ RMSNorm(a) = a / RMS(a) ⊙ g，其中RMS(a) = √mean(a^2)
 ```
 
 5. FlashAttention部分：
+```
     - llama：
-        - 1、
+        - 1、没有attention中的张量并行；没有分组注意力；
+```
+
+6. ROPE部分：
+```
+    - llama:
+        - 1、非常优雅，没有乱七八糟的操作，定义了inv_freq和t之后einsum得到emb，接着做了cos和sin处理；
+        - 2、rotate_half中交换元素顺序，没有按照图片中的位置交换，而是使用切片，前后半区的交换；
+```
+
+7. PreTrainedModel部分：
+```
+    - llama:
+        - 1、初始化模型的线性层权重(默认0均值，0.02方差)、偏差（默认0）
+        - 2、embedding层权重（默认0均值，0.02方差）、pad向量全0；
+```

@@ -10,7 +10,7 @@ print(inv_freq)
 list1 = inv_freq.tolist()
 # for i in range(len(list1)-1):
 #     print(list1[i] / list1[i+1])
-breakpoint()
+# breakpoint()
 
 t = torch.arange(max_seq_len_cached, dtype=inv_freq.dtype)         # YoungL：生成[0-max_seq_len_cached)的一维数组
 
@@ -25,3 +25,11 @@ freqs1 = freqs[..., : freqs.shape[-1] // 2]
 freqs2 = freqs[..., freqs.shape[-1] // 2 :]  
 a = torch.cat((-freqs2, freqs1), dim=-1)
 print(a)
+
+scaling_factor = 0.5
+seq_len = 10
+max_position_embeddings=15
+base = base * (
+    (scaling_factor * seq_len / max_position_embeddings) - (scaling_factor - 1)
+) ** (dim / (dim - 2)) 
+print("base", base)
