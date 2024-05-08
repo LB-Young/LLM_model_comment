@@ -260,7 +260,7 @@ class QWenAttention(nn.Module):
         self.c_attn = nn.Linear(config.hidden_size, 3 * self.projection_size)
 
         self.c_proj = nn.Linear(
-            config.hidden_size, self.projection_size, bias=not config.no_bias
+            config.projection_size, self.hidden_size, bias=not config.no_bias
         )       # YoungL：此处的输入与输出维度错误，因为输入与输出维度值相同，所以未报错
 
         self.is_fp32 = not (config.bf16 or config.fp16)

@@ -139,11 +139,11 @@ class LlamaRotaryEmbedding(nn.Module):                  # YoungL：旋转位置�
         self.max_seq_len_cached = seq_len                                                           # YoungL：记录position_ids的长度
         t = torch.arange(self.max_seq_len_cached, device=device, dtype=self.inv_freq.dtype)         # YoungL：生成[0-max_seq_len_cached)的一维数组
 
-        freqs = torch.einsum("i,j->ij", t, self.inv_freq)
+        freqs = torch.einsum("i,j->ij", t, self.inv_freq)       # YoungL：旋转矩阵维度 max_position_embeddings * dim/2
         # Different from paper, but it uses a different permutation in order to obtain the same calculation
-        emb = torch.cat((freqs, freqs), dim=-1)
-        self.register_buffer("cos_cached", emb.cos()[None, None, :, :].to(dtype), persistent=False)
-        self.register_buffer("sin_cached", emb.sin()[None, None, :, :].to(dtype), persistent=False)
+        emb = torch.cat((freqs, freqs), dim=-1)         # YoungL：旋转矩阵维度 max_position_embeddings * dim
+        self.register_buffer("cos_cached", emb.cos()[None, None, :, :].to(dtype), persistent=False) # YoungL：cos处理的旋转矩阵维度 1 * 1 * max_position_embeddings * dim
+        self.register_buffer("sin_cached", emb.sin()[None, None, :, :].to(dtype), persistent=False) # YoungL：sin处理的旋转矩阵维度 1 * 1 * max_position_embeddings * dim
 
     def forward(self, x, seq_len=None):
         # x: [bs, num_attention_heads, seq_len, head_size]
@@ -203,19 +203,27 @@ class LlamaDynamicNTKScalingRotaryEmbedding(LlamaRotaryEmbedding):
 
 def rotate_half(x):
     """Rotates half the hidden dims of the input."""
-    x1 = x[..., : x.shape[-1] // 2]
-    x2 = x[..., x.shape[-1] // 2 :]
+    x1 = x[..., : x.shape[-1] // 2]         # YoungL： 维度的前一半与后一半换位置；而非理论图片中的相邻两个位置交换，属于等价变换
+    x2 = x[..., x.shape[-1] // 2 :]         # YoungL： 维度的前一半与后一半换位置；而非理论图片中的相邻两个位置交换，属于等价变换
     return torch.cat((-x2, x1), dim=-1)
 
 
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids):
+    """
+    # YoungL： dim == hidden_size
+    q: b * seq_len * dim
+    k: b * seq_len * dim
+    cos: 1 * 1 * max_position_embeddings * dim
+    sin: 1 * 1 * max_position_embeddings * dim
+    position_ids: b * seq_len
+    """
     # The first two dimensions of cos and sin are always 1, so we can `squeeze` them.
-    cos = cos.squeeze(1).squeeze(0)  # [seq_len, dim]
-    sin = sin.squeeze(1).squeeze(0)  # [seq_len, dim]
-    cos = cos[position_ids].unsqueeze(1)  # [bs, 1, seq_len, dim]
-    sin = sin[position_ids].unsqueeze(1)  # [bs, 1, seq_len, dim]
-    q_embed = (q * cos) + (rotate_half(q) * sin)
-    k_embed = (k * cos) + (rotate_half(k) * sin)
+    cos = cos.squeeze(1).squeeze(0)  # YoungL： [max_position_embeddings, dim]
+    sin = sin.squeeze(1).squeeze(0)  # YoungL： [max_position_embeddings, dim]
+    cos = cos[position_ids].unsqueeze(1)  # YoungL： [bs, 1, seq_len, dim]
+    sin = sin[position_ids].unsqueeze(1)  # YoungL： [bs, 1, seq_len, dim]
+    q_embed = (q * cos) + (rotate_half(q) * sin)    # YoungL： 实现与理论图片中的计算有出入，但是属于等价变换
+    k_embed = (k * cos) + (rotate_half(k) * sin)    # YoungL： 实现与理论图片中的计算有出入，但是属于等价变换
     return q_embed, k_embed
 
 
@@ -265,7 +273,8 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     if n_rep == 1:
         return hidden_states
     hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
-    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
+    # YoungL：并不是一个k和v复制几次放在一起，即可以是k1,k2,k3,k1,k2,k3不一定是k1,k1,k2,k2,k3,k3
+    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)        
 
 
 class LlamaAttention(nn.Module):                                            # YoungL：多头注意力机制

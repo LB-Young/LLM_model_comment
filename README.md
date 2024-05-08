@@ -26,8 +26,9 @@ Swish(x) = x*sigmoid(ßx)   GLU(x) = sigmoid(W1x+b)⊗(Vx+c)   SwiGLU(x) = Swish
 2. Attention部分：
 ```
     - llama：
-        - 1、attention部分包含张量并行代码；
-        - 2、使用了分组注意力机制，所以在380-381行对k和v进行了复制；
+        - 1、init主要定义了四个线性层，并且初始化了rope；
+        - 2、attention部分包含张量并行代码；
+        - 3、使用了分组注意力机制，所以在380-381行对k和v进行了复制；
     - Qwen：
         - 1、将QKV的线性变换矩阵合并为self.c_attn，对输入做完线性变换之后，在最后一个维度上split得到Q,K,V;
         - 2、注意力计算部分的点积计算直接调用F.scaled_dot_product_attention；
@@ -51,3 +52,7 @@ RMSNorm(a) = a / RMS(a) ⊙ g，其中RMS(a) = √mean(a^2)
 ```
     - llama、Qwen、Yi中self.weight初始化为1矩阵；Baichuan2中self.weight初始化为空矩阵；
 ```
+
+5. FlashAttention部分：
+    - llama：
+        - 1、
