@@ -5,6 +5,9 @@
     - Baichuan2：huggingface
     - Yi：huggingface
 
+### 进度：
+    - llama源码主体部分已经注释完成；
+
 ### 代码对比：
 
 1. MLP代码部分：
