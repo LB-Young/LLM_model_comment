@@ -59,7 +59,8 @@ def _get_unpad_data(padding_mask):      # YoungL：获取非pad数据   padding_
     indices = torch.nonzero(padding_mask.flatten(), as_tuple=False).flatten()       # YoungL：将pad_mask打平并且返回非0元素的索引
     # YoungL：统计了每一条数据的长度之后，再打平。这样才能知道打平之后的indices怎么切分才能得到原来的每一条数据
     max_seqlen_in_batch = seqlens_in_batch.max().item()     # YoungL：获取当前batch中最长的数据
-    cu_seqlens = F.pad(torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.torch.int32), (1, 0))
+    cu_seqlens = F.pad(torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.torch.int32), (1, 0))      
+
     return (
         indices,
         cu_seqlens,
@@ -75,13 +76,13 @@ def _make_causal_mask(
     Make causal mask used for bi-directional self-attention.
     """
     bsz, tgt_len = input_ids_shape
-    mask = torch.full((tgt_len, tgt_len), torch.finfo(dtype).min, device=device)
-    mask_cond = torch.arange(mask.size(-1), device=device)
-    mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
+    mask = torch.full((tgt_len, tgt_len), torch.finfo(dtype).min, device=device)        # YoungL：最小值填充mask矩阵
+    mask_cond = torch.arange(mask.size(-1), device=device)                                             # YoungL：获取seq长度
+    mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)                    # YoungL：三角矩阵填充
     mask = mask.to(dtype)
 
     if past_key_values_length > 0:
-        mask = torch.cat([torch.zeros(tgt_len, past_key_values_length, dtype=dtype, device=device), mask], dim=-1)
+        mask = torch.cat([torch.zeros(tgt_len, past_key_values_length, dtype=dtype, device=device), mask], dim=-1)      # YoungL：past_key_values_length位置不需要mask，用0填充
     return mask[None, None, :, :].expand(bsz, 1, tgt_len, tgt_len + past_key_values_length)
 
 
