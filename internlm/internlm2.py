@@ -595,11 +595,11 @@ class InternLM2DecoderLayer(nn.Module):
         super().__init__()
         self.hidden_size = config.hidden_size
 
-        self.attention = INTERNLM2_ATTENTION_CLASSES[config.attn_implementation](config=config)
+        self.attention = INTERNLM2_ATTENTION_CLASSES[config.attn_implementation](config=config)             # YoungL：attention
 
-        self.feed_forward = InternLM2MLP(config)
-        self.attention_norm = InternLM2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.ffn_norm = InternLM2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.feed_forward = InternLM2MLP(config)                                                    # YoungL：前馈层
+        self.attention_norm = InternLM2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)     # YoungL：attention层RMSNorm
+        self.ffn_norm = InternLM2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)           # YoungL：ffn的RMSNorm
 
     def forward(
         self,
@@ -793,8 +793,8 @@ class InternLM2Model(InternLM2PreTrainedModel):
 
         self.tok_embeddings = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
 
-        self.layers = nn.ModuleList([InternLM2DecoderLayer(config) for _ in range(config.num_hidden_layers)])
-        self.norm = InternLM2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.layers = nn.ModuleList([InternLM2DecoderLayer(config) for _ in range(config.num_hidden_layers)])   # YoungL：decoder_layer主体
+        self.norm = InternLM2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)       # YoungL：RMSNorm
 
         self.gradient_checkpointing = False
         # Initialize weights and apply final processing
@@ -842,19 +842,19 @@ class InternLM2Model(InternLM2PreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions   # YoungL：是否输出attention
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
+        )                                                                                                           # YoungL：是否输出
+        use_cache = use_cache if use_cache is not None else self.config.use_cache                                   # YoungL：是否输出
 
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict                       # YoungL：输出形式
 
-        if self.config.attn_implementation == "flash_attention_2":
+        if self.config.attn_implementation == "flash_attention_2":                                  # YoungL：是否使用flash_attention
             _import_flash_attn()
 
         # retrieve input_ids and inputs_embeds
-        if input_ids is not None and inputs_embeds is not None:
+        if input_ids is not None and inputs_embeds is not None:                                     # YoungL：取出bzs，seq_l
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
             batch_size, seq_length = input_ids.shape[:2]
@@ -865,11 +865,11 @@ class InternLM2Model(InternLM2PreTrainedModel):
 
         seq_length_with_past = seq_length
         past_key_values_length = 0
-        if past_key_values is not None:
+        if past_key_values is not None:                                                 # YoungL：长度加上past_key_value
             past_key_values_length = past_key_values[0][0].shape[2]
             seq_length_with_past = seq_length_with_past + past_key_values_length
 
-        if position_ids is None:
+        if position_ids is None:                                                        # YoungL：生成 position_id
             device = input_ids.device if input_ids is not None else inputs_embeds.device
             position_ids = torch.arange(
                 past_key_values_length, seq_length + past_key_values_length, dtype=torch.long, device=device
@@ -877,9 +877,9 @@ class InternLM2Model(InternLM2PreTrainedModel):
             position_ids = position_ids.unsqueeze(0)
 
         if inputs_embeds is None:
-            inputs_embeds = self.tok_embeddings(input_ids)
+            inputs_embeds = self.tok_embeddings(input_ids)                          # YoungL：对inputs编码
 
-        if self.config.attn_implementation == "flash_attention_2":
+        if self.config.attn_implementation == "flash_attention_2":                      # YoungL：生成mask矩阵
             # 2d mask is passed through the layers
             attention_mask = attention_mask if (attention_mask is not None and 0 in attention_mask) else None
         else:
@@ -892,7 +892,7 @@ class InternLM2Model(InternLM2PreTrainedModel):
             )
 
         # embed positions
-        hidden_states = inputs_embeds
+        hidden_states = inputs_embeds                                   # YoungL：输入的隐状态
 
         if self.gradient_checkpointing and self.training:
             if use_cache:
@@ -907,10 +907,10 @@ class InternLM2Model(InternLM2PreTrainedModel):
         next_decoder_cache = () if use_cache else None
 
         for idx, decoder_layer in enumerate(self.layers):
-            if output_hidden_states:
+            if output_hidden_states:                                        # YoungL：保存隐状态
                 all_hidden_states += (hidden_states,)
 
-            past_key_value = past_key_values[idx] if past_key_values is not None else None
+            past_key_value = past_key_values[idx] if past_key_values is not None else None      # YoungL：获取上一轮当前层的kv
 
             if self.gradient_checkpointing and self.training:
 
@@ -928,7 +928,7 @@ class InternLM2Model(InternLM2PreTrainedModel):
                     position_ids,
                     None,
                 )
-            else:
+            else:                                               # YoungL：decoder_layer计算
                 layer_outputs = decoder_layer(
                     hidden_states,
                     attention_mask=attention_mask,
@@ -938,15 +938,15 @@ class InternLM2Model(InternLM2PreTrainedModel):
                     use_cache=use_cache,
                 )
 
-            hidden_states = layer_outputs[0]
+            hidden_states = layer_outputs[0]                    # YoungL：layer输出
 
-            if use_cache:
+            if use_cache:                                       # YoungL：layer输出的kv
                 next_decoder_cache += (layer_outputs[2 if output_attentions else 1],)
 
-            if output_attentions:
+            if output_attentions:                               # YoungL：layer输出的attention矩阵
                 all_self_attns += (layer_outputs[1],)
 
-        hidden_states = self.norm(hidden_states)
+        hidden_states = self.norm(hidden_states)                # YoungL：RMSNorm，layer的mlp输出是没有norm的。
 
         # add hidden states from the last decoder layer
         if output_hidden_states:
