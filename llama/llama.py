@@ -958,7 +958,7 @@ class LlamaModel(LlamaPreTrainedModel):         # YoungL：包括embedding和多
                 all_self_attns += (layer_outputs[1],)
 
         # YoungL：此处为所有block的最后一层的输出
-        hidden_states = self.norm(hidden_states)    # YoungL：最后一层的出书hidden_states做归一化处理
+        hidden_states = self.norm(hidden_states)    # YoungL：最后一层的输出hidden_states做归一化处理
 
         # add hidden states from the last decoder layer
         if output_hidden_states:                    # YoungL：将最后一层的hidden_states加入到all_hidden_states中

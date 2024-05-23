@@ -1,59 +1,3 @@
-Hugging Face's logo
-Hugging Face
-Search models, datasets, users...
-Models
-Datasets
-Spaces
-Posts
-Docs
-Pricing
-
-
-
-
-THUDM
-/
-chatglm3-6b 
-
-like
-951
-Transformers
-PyTorch
-Safetensors
-Chinese
-English
-chatglm
-glm
-thudm
-custom_code
-Inference Endpoints
-
-arxiv:
-2103.10360
-
-arxiv:
-2210.02414
-Model card
-Files and versions
-Community
-52
-chatglm3-6b
-/
-modeling_chatglm.py
-
-zRzRzRzRzRzRzR's picture
-zRzRzRzRzRzRzR
-add set_input_embeddings(self, value):
-f308259
-VERIFIED
-3 months ago
-raw
-history
-blame
-contribute
-delete
-No virus
-55.9 kB
 """ PyTorch ChatGLM model. """
 
 import math
@@ -791,7 +735,7 @@ class ChatGLMModel(ChatGLMPreTrainedModel):
         init_kwargs = {}
         if device is not None:
             init_kwargs["device"] = device
-        self.embedding = init_method(Embedding, config, **init_kwargs)      # YoungL：
+        self.embedding = init_method(Embedding, config, **init_kwargs)      # YoungL：初始化embedding
         self.num_layers = config.num_layers
         self.multi_query_group_num = config.multi_query_group_num
         self.kv_channels = config.kv_channels

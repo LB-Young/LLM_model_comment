@@ -418,14 +418,14 @@ class MoEGate(nn.Module):
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
 
     def forward(self, hidden_states):
-        bsz, seq_len, h = hidden_states.shape               # YoungL：记录输入尺寸
+        bsz, seq_len, h = hidden_states.shape               # YoungL：记录输入尺寸  bz * sq * hidden_size
         ### compute gating score
-        hidden_states = hidden_states.view(-1, h)           # YoungL：
+        hidden_states = hidden_states.view(-1, h)           # YoungL：(bz * sq) * hidden_size
         logits = F.linear(
             hidden_states.type(torch.float32), self.weight.type(torch.float32), None
-        )                                                   # YoungL： 将输入维度映射至gate维度
+        )        # YoungL： 将输入维度映射至gate维度    (bz * sq) * self.n_routed_experts
         if self.scoring_func == "softmax":
-            scores = logits.softmax(dim=-1, dtype=torch.float32)            # YoungL：计算每个gate的权重
+            scores = logits.softmax(dim=-1, dtype=torch.float32)            # YoungL：计算每个gate的权重(bz * sq) * self.n_routed_experts
         else:
             raise NotImplementedError(
                 f"insupportable scoring function for MoE gating: {self.scoring_func}"
@@ -439,13 +439,14 @@ class MoEGate(nn.Module):
         elif self.topk_method == "group_limited_greedy":
             group_scores = (
                 scores.view(bsz * seq_len, self.n_group, -1).max(dim=-1).values
-            )  # [n, n_group]                                               # YoungL：gate维度分组
+            )  # [n, n_group]          # YoungL：gate维度分组(bz * sq) * self.n_group
             group_idx = torch.topk(
                 group_scores, k=self.topk_group, dim=-1, sorted=False
             )[
                 1
-            ]  # [n, top_k_group]                                           # YoungL：每组取出topk_group
+            ]  # [n, top_k_group]     # YoungL：每组取出topk_group个最大值 (bz * sq) * self.topk_group
             group_mask = torch.zeros_like(group_scores)  # [n, n_group]         # YoungL：初始化group_mask，值填充为0，
+            # YoungL：group_mask: (bz * sq) * self.n_group
             group_mask.scatter_(1, group_idx, 1)  # [n, n_group]        # YoungL：group_idx中保存topk的索引，group_mask中对应group_idx的位置值置为1，表明该gate被选中
             score_mask = (
                 group_mask.unsqueeze(-1)
@@ -454,11 +455,19 @@ class MoEGate(nn.Module):
                 )
                 .reshape(bsz * seq_len, -1)
             )  # [n, e]                         # YoungL：(bsz * seq_len, self.n_routed_experts)
-            tmp_scores = scores.masked_fill(~score_mask.bool(), 0.0)  # [n, e]      # YoungL：1的位置不填充mask值，0的位置填充
+            tmp_scores = scores.masked_fill(~score_mask.bool(), 0.0)  # [n, e]      
+            # YoungL：1的位置不填充mask值，0的位置填充
             topk_weight, topk_idx = torch.topk(
                 tmp_scores, k=self.top_k, dim=-1, sorted=False
-            )                               # YoungL：取出topk位置，刚刚是gate每个分组中的index，现在是gate维度上全局得到indedx
-
+            )                               # YoungL：取出topk位置，刚刚是gate每个分组中的index，现在是gate维度上全局得到index
+            """
+            # YoungL：
+            首先将最后一个维度映射到专家个数的维度，然后softmax计算每个专家的得分；
+            将专家维度进行分组，并且以组内专家的最高分作为当前分组的得分；
+            选出self.topk_group个分数最高的组，其他组进行mask；
+            452行，用topk的分组，expand回专家数维度；如果当前组被mask，则组内所有专家都被mask；
+            在所有没有被mask的专家中再取self.top_k个专家；
+            """
         ### norm gate to sum 1
         if self.top_k > 1 and self.norm_topk_prob:                              # YoungL：gate权重归一化，得到每个门的概率
             denominator = topk_weight.sum(dim=-1, keepdim=True) + 1e-20
@@ -568,7 +577,7 @@ class DeepseekV2MoE(nn.Module):
         orig_shape = hidden_states.shape            # YoungL：记录初始输入shape
         topk_idx, topk_weight, aux_loss = self.gate(hidden_states)      # YoungL：gate维度：topk索引、topk对应的概率、和专家平衡损失
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])     # YoungL：bsz*seq_l * hidden_size
-        flat_topk_idx = topk_idx.view(-1)                                   # YoungL：bsz*seq_l*self.num_experts_per_tok
+        flat_topk_idx = topk_idx.view(-1)                                   # YoungL：bsz*seq_l*self.num_experts_per_topk
         if self.training:
             hidden_states = hidden_states.repeat_interleave(
                 self.num_experts_per_tok, dim=0
@@ -715,20 +724,20 @@ class DeepseekV2Attention(nn.Module):
         self.q_a_layernorm = DeepseekV2RMSNorm(config.q_lora_rank)
         self.q_b_proj = nn.Linear(
             config.q_lora_rank, self.num_heads * self.q_head_dim, bias=False
-        )                                                               # YoungL：Q的升维线性层，维度增加到head_num * head_dim
+        )       # YoungL：Q的升维线性层，维度增加到head_num * head_dim，Q的rope和是基于降维后的变量典型变换的到，
 
         self.kv_a_proj_with_mqa = nn.Linear(
             self.hidden_size,
             config.kv_lora_rank + config.qk_rope_head_dim,
             bias=config.attention_bias,
-        )                                                               # YoungL：KV降维线性层，输出维度为秩+rope维度。论文中Q是单独的latent变换，kv公用一个latent变换
+        )   # YoungL：KV降维线性层，输出维度为秩+rope维度。论文中Q是单独的latent变换，kv公用一个latent变换，K的rope部分基于输入线性变换得到
         self.kv_a_layernorm = DeepseekV2RMSNorm(config.kv_lora_rank)
         self.kv_b_proj = nn.Linear(
             config.kv_lora_rank,
             self.num_heads
             * (self.q_head_dim - self.qk_rope_head_dim + self.v_head_dim),
             bias=False,
-        )                                       # YoungL：kv升维，输出维度为k维度+v维度-k的rope维度，q_head_dim==k_head_dim，并且要预留维度拼接kv_a_proj_with_mqa中split出来的k_pe
+        )   # YoungL：kv升维，输出维度为k维度+v维度-k的rope维度，q_head_dim==k_head_dim，并且要预留维度拼接kv_a_proj_with_mqa中split出来的k_pe
 
         self.o_proj = nn.Linear(
             self.num_heads * self.v_head_dim,
@@ -1236,7 +1245,7 @@ class DeepseekV2DecoderLayer(nn.Module):
             )
         residual = hidden_states
 
-        hidden_states = self.input_layernorm(hidden_states)
+        hidden_states = self.input_layernorm(hidden_states)                             # YoungL：前置归一化
 
         # Self Attention
         hidden_states, self_attn_weights, present_key_value = self.self_attn(
@@ -1422,20 +1431,20 @@ class DeepseekV2Model(DeepseekV2PreTrainedModel):
             output_attentions
             if output_attentions is not None
             else self.config.output_attentions
-        )
+        )                                                       # YoungL：是否输出attention
         output_hidden_states = (
             output_hidden_states
             if output_hidden_states is not None
             else self.config.output_hidden_states
-        )
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
+        )                                                       # YoungL：是否输出中间层结果
+        use_cache = use_cache if use_cache is not None else self.config.use_cache       # YoungL：是否使用缓存
 
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
-        )
+        )                                                                               # YoungL：以什么格式返回结果
 
         # retrieve input_ids and inputs_embeds
-        if input_ids is not None and inputs_embeds is not None:
+        if input_ids is not None and inputs_embeds is not None:                         # YoungL：输入
             raise ValueError(
                 "You cannot specify both input_ids and inputs_embeds at the same time"
             )
@@ -1460,7 +1469,7 @@ class DeepseekV2Model(DeepseekV2PreTrainedModel):
                 past_key_values = DynamicCache.from_legacy_cache(past_key_values)
             past_key_values_length = past_key_values.get_usable_length(seq_length)
 
-        if position_ids is None:
+        if position_ids is None:                                                            # YoungL：position_ids
             device = input_ids.device if input_ids is not None else inputs_embeds.device
             position_ids = torch.arange(
                 past_key_values_length,
