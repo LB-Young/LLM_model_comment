@@ -101,9 +101,9 @@ class MultiHeadedAttention(nn.Module):  # SelfAttention
         super().__init__()
         self.head_count = head_count
 
-        self.linear_keys = nn.Linear(model_dim, head_count * self.dim_per_head)
+        self.linear_keys = nn.Linear(model_dim, head_count * self.)
         self.linear_values = nn.Linear(model_dim,
-                                       head_count * self.dim_per_head)
+                           dim_per_head            head_count * self.dim_per_head)
         self.linear_query = nn.Linear(model_dim,
                                       head_count * self.dim_per_head)
         self.softmax = nn.Softmax(dim=-1)
